@@ -27,10 +27,12 @@ You need Google Cloud OAuth credentials:
 
 ### 1. Initial Google OAuth consent (one-time)
 
-Before deploying, run locally to authorize your Google account:
+Before deploying, run the upstream image locally to authorize your Google account:
 
 ```bash
-docker run -it --rm -p 8000:8000 \
+mkdir -p google_creds && chmod 777 google_creds
+
+docker run -it --rm -p 8000:8000 --user root \
   -v $(pwd)/google_creds:/credentials \
   -e GOOGLE_OAUTH_CLIENT_ID="your-client-id" \
   -e GOOGLE_OAUTH_CLIENT_SECRET="your-client-secret" \
@@ -40,7 +42,25 @@ docker run -it --rm -p 8000:8000 \
   "uv run main.py --transport streamable-http --single-user"
 ```
 
-Call `start_google_auth` via the MCP endpoint to get an authorization URL, complete it in your browser, and the tokens will be saved in `./google_creds/`.
+Then trigger auth by calling `start_google_auth` via the MCP endpoint (or use curl):
+
+```bash
+# Initialize a session
+SESSION=$(curl -si -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"setup","version":"1.0"}}}' \
+  | grep -i mcp-session-id | awk '{print $2}' | tr -d '\r')
+
+# Trigger Google OAuth
+curl -s -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: $SESSION" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"start_google_auth","arguments":{"user_google_email":"your-email@gmail.com","service_name":"gmail"}}}'
+```
+
+Open the authorization URL from the response in your browser and complete the consent. The tokens will be saved in `./google_creds/`.
 
 ### 2. Deploy with OAuth proxy
 
@@ -57,6 +77,8 @@ docker run -d \
   -p 3000:3000 \
   ghcr.io/afonsofigs/google-workspace-mcp:latest
 ```
+
+Check the logs for `client_id` and `client_secret` to use with Claude.ai.
 
 ## Environment Variables
 
@@ -108,9 +130,14 @@ Claude.ai / Scheduled Tasks
 
 See [k8s/deployment.yaml](k8s/deployment.yaml) for an example manifest. You'll need:
 
-- A Secret with your Google OAuth credentials and `MCP_SECRET`
-- A PVC to persist the Google OAuth tokens
-- A `client_secret.json` mounted from the Secret
+1. A Secret with your Google OAuth credentials, `client_secret.json`, and `MCP_SECRET`
+2. A PVC to persist the Google OAuth tokens
+3. After the first deploy, copy the tokens from step 1 into the PVC:
+
+```bash
+POD=$(kubectl get pod -n google-mcp-ns -l app=google-mcp -o jsonpath='{.items[0].metadata.name}')
+kubectl cp ./google_creds/your-email@gmail.com.json google-mcp-ns/$POD:/credentials/
+```
 
 ## Credits
 
