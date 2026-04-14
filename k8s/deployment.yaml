@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: google-mcp-ns
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: google-mcp-secrets
+  namespace: google-mcp-ns
+type: Opaque
+stringData:
+  GOOGLE_OAUTH_CLIENT_ID: "your-google-oauth-client-id"
+  GOOGLE_OAUTH_CLIENT_SECRET: "your-google-oauth-client-secret"
+  USER_GOOGLE_EMAIL: "your-email@gmail.com"
+  MCP_SECRET: "your-mcp-secret-here"
+  client_secret.json: |
+    {"web":{"client_id":"your-client-id","project_id":"your-project","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_secret":"your-client-secret","redirect_uris":["http://localhost:8000/oauth2callback"]}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: google-mcp-creds
+  namespace: google-mcp-ns
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: google-mcp
+  namespace: google-mcp-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: google-mcp
+  template:
+    metadata:
+      labels:
+        app: google-mcp
+    spec:
+      securityContext:
+        runAsUser: 0
+      containers:
+        - name: google-mcp
+          image: ghcr.io/afonsofigs/google-workspace-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: MCP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-mcp-secrets
+                  key: MCP_SECRET
+            - name: SERVER_URL
+              value: "https://your-domain.example.com"
+            - name: GOOGLE_OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: google-mcp-secrets
+                  key: GOOGLE_OAUTH_CLIENT_ID
+            - name: GOOGLE_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-mcp-secrets
+                  key: GOOGLE_OAUTH_CLIENT_SECRET
+            - name: USER_GOOGLE_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: google-mcp-secrets
+                  key: USER_GOOGLE_EMAIL
+            - name: GOOGLE_MCP_CREDENTIALS_DIR
+              value: "/credentials"
+            - name: TOOL_TIER
+              value: "complete"
+          volumeMounts:
+            - name: client-secret
+              mountPath: /app/google-mcp/client_secret.json
+              subPath: client_secret.json
+              readOnly: true
+            - name: creds-storage
+              mountPath: /credentials
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "50m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: client-secret
+          secret:
+            secretName: google-mcp-secrets
+            items:
+              - key: client_secret.json
+                path: client_secret.json
+        - name: creds-storage
+          persistentVolumeClaim:
+            claimName: google-mcp-creds
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: google-mcp
+  namespace: google-mcp-ns
+spec:
+  selector:
+    app: google-mcp
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 3000
