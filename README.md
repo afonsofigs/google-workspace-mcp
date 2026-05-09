@@ -8,6 +8,7 @@ OAuth 2.1 proxy for [google_workspace_mcp](https://github.com/taylorwilsdon/goog
 
 - **120+ Google Workspace tools**: Gmail, Drive, Calendar, Docs, Sheets, Slides, Forms, Chat, Tasks, Contacts, Apps Script, Custom Search
 - **OAuth 2.1**: Fixed client credentials — works with Claude.ai connectors and scheduled tasks
+- **Persistent OAuth tokens**: Issued tokens are written to disk so they survive container/pod restarts (no re-auth in Claude.ai after redeploys)
 - **Dynamic tool discovery**: New tools from upstream updates appear automatically
 - **Single Docker image**: Both OAuth proxy and Google Workspace MCP backend in one container
 
@@ -89,7 +90,8 @@ Check the logs for `client_id` and `client_secret` to use with Claude.ai.
 | `GOOGLE_OAUTH_CLIENT_ID` | Yes | Google Cloud OAuth client ID |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Yes | Google Cloud OAuth client secret |
 | `USER_GOOGLE_EMAIL` | Yes | Google account email |
-| `GOOGLE_MCP_CREDENTIALS_DIR` | No | Credentials directory (default: `/credentials`) |
+| `GOOGLE_MCP_CREDENTIALS_DIR` | No | Credentials directory for upstream Google tokens (default: `/credentials`) |
+| `TOKEN_STORE_PATH` | No | Path for persisted OAuth proxy tokens (default: `/credentials/oauth-tokens.json`). Reuses the same volume as `GOOGLE_MCP_CREDENTIALS_DIR`. |
 | `TOOL_TIER` | No | Tool tier: `core`, `extended`, or `complete` (default: all) |
 | `PORT` | No | OAuth proxy port (default: 3000) |
 | `BACKEND_PORT` | No | Backend port (default: 8000) |
@@ -102,6 +104,7 @@ Same pattern as [obsidian-couchdb-mcp](https://github.com/afonsofigs/obsidian-co
 - **Auto-approve** — no login page; security by fixed credentials
 - **PKCE** (S256) mandatory
 - **Redirect URIs** limited to `claude.ai` and `claude.com`
+- **File-persisted token store** — Authorization codes and bearer/refresh tokens are written to `TOKEN_STORE_PATH` (default `/credentials/oauth-tokens.json`, sharing the existing credentials volume). Without a mounted volume, the file lands in ephemeral container storage and connectors will need to re-auth after every restart.
 
 ## Claude.ai Connector Setup
 
@@ -131,7 +134,7 @@ Claude.ai / Scheduled Tasks
 See [k8s/deployment.yaml](k8s/deployment.yaml) for an example manifest. You'll need:
 
 1. A Secret with your Google OAuth credentials, `client_secret.json`, and `MCP_SECRET`
-2. A PVC to persist the Google OAuth tokens
+2. A PVC mounted at `/credentials` — stores **both** the upstream Google OAuth tokens and the OAuth proxy tokens (`oauth-tokens.json`), so Claude.ai connectors don't need to re-auth across pod restarts
 3. After the first deploy, copy the tokens from step 1 into the PVC:
 
 ```bash
