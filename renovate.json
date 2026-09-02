@@ -1,6 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "customManagers:dockerfileVersions"],
+  "extends": [
+    "config:recommended",
+    "customManagers:dockerfileVersions"
+  ],
   "description": [
     "customManagers:dockerfileVersions picks up the annotated ARG in the",
     "Dockerfile that pins taylorwilsdon/google_workspace_mcp, which is a git",
@@ -11,7 +14,9 @@
     "Upstream ships roughly weekly and has published same-week hotfixes."
   ],
   "timezone": "Europe/Lisbon",
-  "schedule": ["before 6am on monday"],
+  "schedule": [
+    "before 6am on monday"
+  ],
   "dependencyDashboard": true,
   "rangeStrategy": "pin",
   "minimumReleaseAge": "5 days",
@@ -23,14 +28,29 @@
         "express",
         "zod"
       ],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "proxy dependencies"
     },
     {
       "description": "Upstream backend is the one to read release notes for.",
-      "matchPackageNames": ["taylorwilsdon/google_workspace_mcp"],
+      "matchPackageNames": [
+        "taylorwilsdon/google_workspace_mcp"
+      ],
       "groupName": "upstream google_workspace_mcp",
       "semanticCommitType": "build"
+    },
+    {
+      "description": "Overrides exist to pull patched releases of transitives INSIDE the major their parent expects (fastmcp wants undici 7, fast-uri 3, @hono/node-server 1). A major bump here breaks the backend, which is the exact failure mode that forced obsidian-sync-mcp 0.6.5. Security patches still come through as minor/patch.",
+      "matchDepTypes": [
+        "overrides"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
     }
   ]
 }
