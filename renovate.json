@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "customManagers:dockerfileVersions"],
+  "description": [
+    "customManagers:dockerfileVersions picks up the annotated ARG in the",
+    "Dockerfile that pins taylorwilsdon/google_workspace_mcp, which is a git",
+    "tag rather than a package and would otherwise go unwatched. This is the",
+    "pin that mattered most: it used to be an unpinned clone, so the image",
+    "silently carried whatever upstream HEAD was on build day.",
+    "minimumReleaseAge holds updates for 5 days, matching the other wrappers.",
+    "Upstream ships roughly weekly and has published same-week hotfixes."
+  ],
+  "timezone": "Europe/Lisbon",
+  "schedule": ["before 6am on monday"],
+  "dependencyDashboard": true,
+  "rangeStrategy": "pin",
+  "minimumReleaseAge": "5 days",
+  "packageRules": [
+    {
+      "description": "Proxy plumbing moves together; the upstream MCP gets its own PR.",
+      "matchPackageNames": [
+        "@modelcontextprotocol/sdk",
+        "express",
+        "zod"
+      ],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "proxy dependencies"
+    },
+    {
+      "description": "Upstream backend is the one to read release notes for.",
+      "matchPackageNames": ["taylorwilsdon/google_workspace_mcp"],
+      "groupName": "upstream google_workspace_mcp",
+      "semanticCommitType": "build"
+    }
+  ]
+}

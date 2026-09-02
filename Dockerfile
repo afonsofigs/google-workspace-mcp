@@ -13,15 +13,16 @@ RUN pip install --no-cache-dir uv
 # Clone and install Google Workspace MCP
 WORKDIR /app/google-mcp
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-# Pinned to upstream v1.25.2. The unpinned clone meant every rebuild silently
-# adopted whatever HEAD was that day, so the image drifted without a decision
-# and builds were not reproducible.
-# Pinned by commit SHA rather than tag: the v1.25.2 tag object is malformed
-# ("is not a commit"), and cloning it checks out an empty working tree.
-ARG GOOGLE_MCP_REF=ce1a9ec4b688c5b43f7fce46eed9abfdbc9c2ef8
+# Pinned to an upstream release. The unpinned clone meant every rebuild
+# silently adopted whatever HEAD happened to be that day, so the image drifted
+# without a decision and builds were not reproducible.
+# Fetched by tag ref rather than `clone --branch`, which fails on these
+# annotated tags with "is not a commit" and leaves an empty working tree.
+# renovate: datasource=github-releases depName=taylorwilsdon/google_workspace_mcp
+ARG GOOGLE_MCP_VERSION=v1.25.2
 RUN git init -q . \
     && git remote add origin https://github.com/taylorwilsdon/google_workspace_mcp.git \
-    && git fetch --depth 1 -q origin "$GOOGLE_MCP_REF" \
+    && git fetch --depth 1 -q origin "refs/tags/$GOOGLE_MCP_VERSION" \
     && git checkout -q FETCH_HEAD \
     && uv sync --frozen --no-dev --extra disk
 
