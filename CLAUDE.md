@@ -22,6 +22,8 @@ Claude.ai (OAuth 2.1 + Streamable HTTP)
 3. Registers each tool as a proxy in our MCP server (with JSON Schema → Zod conversion)
 4. Claude.ai authenticates via OAuth 2.1 → calls our /mcp → we proxy to backend
 
+The /mcp endpoint is stateless (fresh server + transport per request, no session map). Keep it that way: holding sessions leaked memory until the pod was OOM-killed, and after any restart Claude.ai kept sending the dead `mcp-session-id`, got 400 "Server not initialized" and never recovered. Each backend call closes its backend session with DELETE for the same reason.
+
 ## Stack
 
 - `google_workspace_mcp` — Python Google Workspace backend (120+ tools, FastMCP, streamable-http)

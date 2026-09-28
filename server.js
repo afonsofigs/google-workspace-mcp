@@ -24,7 +24,10 @@ if (!MCP_SECRET) {
 
 const backend = spawn(
   "uv",
-  ["run", "main.py", "--transport", "streamable-http", "--single-user"],
+  // --no-sync: the image already holds the synced venv. Without it every boot
+  // re-resolved against PyPI (pulling dev deps like ruff), making startup slow
+  // and dependent on the network.
+  ["run", "--no-sync", "main.py", "--transport", "streamable-http", "--single-user"],
   {
     stdio: ["ignore", "pipe", "pipe"],
     cwd: "/app/google-mcp",
@@ -79,30 +82,35 @@ async function backendMcpCall(method, params = {}) {
 
   await initRes.text();
   const sessionId = initRes.headers.get("mcp-session-id");
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
+    "mcp-session-id": sessionId,
+  };
 
-  await fetch(`${BACKEND_URL}/mcp`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream",
-      "mcp-session-id": sessionId,
-    },
-    body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
-  });
+  try {
+    await fetch(`${BACKEND_URL}/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    });
 
-  const res = await fetch(`${BACKEND_URL}/mcp`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream",
-      "mcp-session-id": sessionId,
-    },
-    body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 2 }),
-  });
+    const res = await fetch(`${BACKEND_URL}/mcp`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 2 }),
+    });
 
-  const text = await res.text();
-  const match = text.match(/data: (.+)/);
-  return match ? JSON.parse(match[1]) : JSON.parse(text);
+    const text = await res.text();
+    const match = text.match(/data: (.+)/);
+    return match ? JSON.parse(match[1]) : JSON.parse(text);
+  } finally {
+    // Every call opens a backend session; left open, the backend keeps them
+    // forever and its memory grows until the pod is OOM-killed.
+    if (sessionId) {
+      await fetch(`${BACKEND_URL}/mcp`, { method: "DELETE", headers }).catch(() => {});
+    }
+  }
 }
 
 const toolsResponse = await backendMcpCall("tools/list");
@@ -352,9 +360,10 @@ app.get("/health", async (_, res) => {
   try {
     const r = await fetch(`${BACKEND_URL}/health`);
     const body = await r.json();
-    res.json({ ok: body.status === "healthy", version: "1.0.0", backend: true });
+    const ok = body.status === "healthy";
+    res.status(ok ? 200 : 503).json({ ok, version: "1.0.0", backend: true });
   } catch {
-    res.json({ ok: false, version: "1.0.0", backend: false });
+    res.status(503).json({ ok: false, version: "1.0.0", backend: false });
   }
 });
 
@@ -364,8 +373,6 @@ app.use(mcpAuthRouter({
   issuerUrl,
   scopesSupported: ["mcp:tools"],
 }));
-
-const transports = new Map();
 
 const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -386,49 +393,36 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
+// Stateless: a fresh server and transport per request, no session map. The
+// proxy keeps no per-session state, and holding sessions meant (a) the map grew
+// without bound until the pod was OOM-killed, and (b) after any restart clients
+// still sending the old mcp-session-id got 400 "Server not initialized", which
+// Claude.ai does not recover from.
 app.post("/mcp", authMiddleware, async (req, res) => {
+  const server = createMcpServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  res.on("close", () => {
+    transport.close();
+    server.close();
+  });
   try {
-    const sessionId = req.headers["mcp-session-id"];
-    if (sessionId && transports.has(sessionId)) {
-      const transport = transports.get(sessionId);
-      await transport.handleRequest(req, res, req.body);
-    } else {
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-      });
-      transport.onclose = () => {
-        if (transport.sessionId) transports.delete(transport.sessionId);
-      };
-      const server = createMcpServer();
-      await server.connect(transport);
-      await transport.handleRequest(req, res, req.body);
-      if (transport.sessionId) {
-        transports.set(transport.sessionId, transport);
-      }
-    }
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
   } catch (err) {
     console.error(`[mcp] POST error: ${err.message}`);
     if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/mcp", authMiddleware, async (req, res) => {
-  const sessionId = req.headers["mcp-session-id"];
-  if (!sessionId || !transports.has(sessionId)) {
-    return res.status(400).json({ error: "Missing or invalid session ID" });
-  }
-  await transports.get(sessionId).handleRequest(req, res);
-});
-
-app.delete("/mcp", authMiddleware, async (req, res) => {
-  const sessionId = req.headers["mcp-session-id"];
-  if (sessionId && transports.has(sessionId)) {
-    await transports.get(sessionId).handleRequest(req, res);
-    transports.delete(sessionId);
-  } else {
-    res.status(404).json({ error: "Session not found" });
-  }
-});
+const methodNotAllowed = (_req, res) => {
+  res.status(405).set("Allow", "POST").json({
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "Method not allowed." },
+    id: null,
+  });
+};
+app.get("/mcp", authMiddleware, methodNotAllowed);
+app.delete("/mcp", authMiddleware, methodNotAllowed);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`google-workspace-mcp v1.0.0 listening on :${PORT}`);
