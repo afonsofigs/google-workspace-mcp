@@ -58,6 +58,8 @@ Note: The backend (`uv run main.py`) must be available at `/app/google-mcp/`. Fo
 - **Proxy, not import** — google_workspace_mcp is Python; our proxy is Node.js. Running it as a child process keeps the stacks separate and allows upstream updates without code changes.
 - **Dynamic tool discovery** — Tools are discovered from backend at startup via tools/list, not hardcoded. New tools from upstream updates appear automatically.
 - **JSON Schema → Zod** — Backend tool schemas are JSON Schema; our proxy converts them to Zod for the MCP SDK, including nested arrays and objects.
+- **Fixed OAuth client, no `/register`** — `client_id` / `client_secret` are derived from `MCP_SECRET` via SHA-256 and pasted by hand into the connector's settings. `ClientsStore` has no `registerClient` on purpose: with it the SDK mounts `/register`, which would hand the fixed `client_secret` to anyone who asked.
+- **Rotating `MCP_SECRET` revokes everything** — on startup the token store (`TOKEN_STORE_PATH`, default `/credentials/oauth-tokens.json`) drops codes and tokens issued to the previous `client_id`, and `verifyAccessToken` refuses a token of another client. `POST /revoke` only revokes tokens of the authenticated client.
 - **runAsUser: 0** — The Dockerfile creates `/app/credentials` with open permissions, but K8s PVCs mount as root. The deployment runs as root to avoid permission issues.
 
 ## CI/CD

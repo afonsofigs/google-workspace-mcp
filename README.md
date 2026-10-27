@@ -79,7 +79,7 @@ docker run -d \
   ghcr.io/afonsofigs/google-workspace-mcp:latest
 ```
 
-Check the logs for `client_id` and `client_secret` to use with Claude.ai.
+Check the logs for `client_id` and `client_secret` to paste into the Claude.ai connector's Advanced settings.
 
 ## Environment Variables
 
@@ -100,11 +100,25 @@ Check the logs for `client_id` and `client_secret` to use with Claude.ai.
 
 Same pattern as [obsidian-couchdb-mcp](https://github.com/afonsofigs/obsidian-couchdb-mcp) and [telegram-bot-mcp](https://github.com/afonsofigs/telegram-bot-mcp):
 
-- **Fixed client credentials** derived from `MCP_SECRET` via SHA-256
+- **Fixed client credentials** derived from `MCP_SECRET` via SHA-256. No dynamic client registration (`/register` is neither served nor advertised): the credentials only reach a client by being pasted into its settings.
+- **Rotating `MCP_SECRET` revokes everything**: on startup, codes and tokens issued to the previous `client_id` are dropped from the token store, and a bearer token of another client is refused.
+- **Revocation**: `POST /revoke` (RFC 7009) revokes an access or refresh token, only when it belongs to the authenticated client.
 - **Auto-approve** — no login page; security by fixed credentials
 - **PKCE** (S256) mandatory
 - **Redirect URIs** limited to `claude.ai` and `claude.com`
 - **File-persisted token store** — Authorization codes and bearer/refresh tokens are written to `TOKEN_STORE_PATH` (default `/credentials/oauth-tokens.json`, sharing the existing credentials volume). Without a mounted volume, the file lands in ephemeral container storage and connectors will need to re-auth after every restart.
+
+### Endpoints
+
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /health` | No | Health check |
+| `GET /.well-known/oauth-authorization-server` | No | OAuth metadata (RFC 8414) |
+| `GET /.well-known/oauth-protected-resource` | No | Protected resource metadata (RFC 9728) |
+| `GET /authorize` | No | OAuth authorization (auto-approve) |
+| `POST /token` | Client credentials | Token exchange |
+| `POST /revoke` | Client credentials | Token revocation (RFC 7009) |
+| `POST /mcp` | Bearer | Streamable HTTP MCP transport (stateless; `GET` / `DELETE` return 405) |
 
 ## Claude.ai Connector Setup
 
@@ -112,7 +126,7 @@ Same pattern as [obsidian-couchdb-mcp](https://github.com/afonsofigs/obsidian-co
 2. Check logs for `client_id` and `client_secret`
 3. Go to [claude.ai/settings/connectors](https://claude.ai/settings/connectors)
 4. Add custom connector: URL `https://your-domain.example.com/mcp`
-5. Enter `client_id` and `client_secret` from logs
+5. Open **Advanced settings** and paste the `client_id` and `client_secret` from the logs. They have to be entered by hand: the server does not support dynamic client registration, so a connector added without them cannot link.
 
 ## Architecture
 
